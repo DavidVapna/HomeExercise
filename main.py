@@ -1,63 +1,77 @@
-import pandas as pd
-from openai import OpenAI
-
-#API_KEY = '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'
-OPENAI_API_KEY='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'
-client = OpenAI(api_key=OPENAI_API_KEY)
-
-
-def generate_response(feedback_text):
-    completion = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system",
-             "content": "Analyze the customer feedback provided below and answer the following tasks, keep it short and simple: "
-                        "1. Summarize the feedback in one sentence. "
-                        "2. Determine the sentiment of the feedback. use only: Positive or Neutral or Negative. "
-                        "3. Identify any specific product features or issues mentioned in the feedback."},
-            {"role": "user", "content": feedback_text}
-        ],
-        max_tokens=100
-    )
-    return completion.choices[0].message.content.strip()
+import llm
+import sentiment_analysis as sa
+import load_data
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 
 
 def evaluate_feedbacks(df):
-    results = []
+    """
+    Evaluate the feedback from the DataFrame by generating responses using an LLM for summaries,
+    sentiments, and product features extraction.
 
+    Args:
+        df (DataFrame): The DataFrame containing customer feedback text.
+
+    Returns:
+        DataFrame: The original DataFrame augmented with summarized feedback, LLM derived sentiment,
+        keyword-based sentiment, and product features.
+    """
+    summarized_feedbacks = []
+    llm_sentiments = []
+    product_feats = []
+    sentiments = []
+    prompts = [
+        "Summarize the customer's feedback in one sentence.",
+        "Determine the sentiment and reply in a single word (positive, negative or neutral).",
+        "Extract any mentioned product features or issues, keep it short and concise, if nothing found"
+        "return NA"
+    ]
+
+    # Process each feedback entry in the DataFrame
     for feedback in df['feedback_text']:
-        response = generate_response(feedback)
-        results.append(response)
+        #for prompt in prompts:
+        summarized_feedbacks.append(llm.generate_response(prompts[0], feedback))
+        llm_sentiments.append(llm.generate_response(prompts[1], feedback))
+        product_feats.append(llm.generate_response(prompts[2], feedback))
+        sentiments.append(sa.keyword_based_sentiment(feedback))
 
-    df['evaluated_response'] = results
-    return df
-
-
-def data_set(path):
-    df = pd.read_csv(path)
-
-    # Handle missing string data
-    df['customer_name'] = df['customer_name'].fillna('Unknown')
-    df['feedback_text'] = df['feedback_text'].fillna('Unknown')
-
-    # Convert 'feedback_id' to integer, handle non-numeric with -1
-    df['feedback_id'] = pd.to_numeric(df['feedback_id'], errors='coerce').fillna(-1).astype(int)
-
-    # Handle date parsing with more control over format and error handling
-    # Assuming the date format is day-first (e.g., "31/12/2021")
-    try:
-        df['submission_date'] = pd.to_datetime(df['submission_date'], format='%d/%m/%Y', errors='coerce')
-    except ValueError:
-        # Fallback if format is unknown or mixed, with day-first assumption
-        df['submission_date'] = pd.to_datetime(df['submission_date'], dayfirst=True, errors='coerce')
-
-    # Fill invalid or missing dates with a default early date
-    default_date = pd.Timestamp('1900-01-01')
-    df['submission_date'] = df['submission_date'].fillna(default_date)
+    # Append new columns to the DataFrame with the results
+    df['summarized_feedback'] = summarized_feedbacks
+    df['llm_sentiment'] = llm_sentiments
+    df['keyword_sentiment'] = sentiments
 
     return df
 
 
-loaded_df = data_set('./customer_feedback.csv')
-evaluated_df = evaluate_feedbacks(loaded_df)
-print(evaluated_df)
+def set_html(df):
+    """
+    Convert a DataFrame to an HTML table with specified classes for styling.
+
+    Args:
+        df (DataFrame): The DataFrame to convert.
+
+    Returns:
+        str: HTML string of the table.
+    """
+    html_table = df.to_html(index=False, classes='min-w-full table-auto bg-white rounded-lg overflow-hidden')
+
+
+def main():
+    """
+    Main function to load data, evaluate feedbacks, and print the DataFrame.
+    """
+    df = load_data.data_set('./customer_feedback.csv')
+    evaluated_df = evaluate_feedbacks(df)
+    set_html(evaluated_df)
+
+    # not working yet, supposed to calculate performance metrics
+    # accuracy = accuracy_score(evaluated_df['keyword_sentiment'], evaluated_df['llm_sentiment'])
+    # precision, recall, _, _ = precision_recall_fscore_support(
+    #     evaluated_df['keyword_sentiment'], evaluated_df['llm_sentiment'],
+    #     average='binary', pos_label='positive')
+
+    print(evaluated_df)
+
+
+if __name__ == "__main__":
+    main()
